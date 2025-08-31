@@ -1,8 +1,33 @@
-import axios from "axios";
+import axios, { type AxiosRequestConfig } from "axios";
+import { useAuthStore } from "../stores/auth";
 
 const baseAPIClient = axios.create({
-  baseURL: "http://localhost:8000",
+  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/",
 });
+
+baseAPIClient.interceptors.request.use((config) => {
+  const { token } = useAuthStore.getState();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers["Authorization"] = `Bearer ${token}`;
+  }
+  config.headers = config.headers ?? {};
+  config.headers["accept"] = "application/json";
+  return config;
+});
+
+baseAPIClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 401) {
+        useAuthStore.getState().clearAuth();
+      }
+      return Promise.reject(error.response?.data ?? error);
+    }
+    return Promise.reject(error);
+  }
+);
 
 export enum Method {
   GET = "get",
@@ -12,33 +37,34 @@ export enum Method {
   PUT = "put",
 }
 
+export type ResponseType =
+  | "arraybuffer"
+  | "blob"
+  | "document"
+  | "json"
+  | "text"
+  | "stream";
+
 interface RequestProps {
-  token?: string;
   method?: Method;
   url: string;
   id?: string;
   data?: unknown;
+  axiosConfig?: AxiosRequestConfig;
+
+  responseType?: ResponseType;
 }
 
 export const request = async <T>(params: RequestProps): Promise<T> => {
-  const { token, url, method, id, data } = params;
+  const { url, method, id, data, axiosConfig, responseType } = params;
 
-  try {
-    const res = await baseAPIClient.request({
-      method: method || "get",
-      url: id ? `${url}/${id}` : url,
-      data,
-      headers: {
-        accept: "application/json",
-        Authorization: token,
-      },
-    });
+  const res = await baseAPIClient.request<T>({
+    method: method || "get",
+    url: id ? `${url}/${id}` : url,
+    data,
+    responseType,
+    ...axiosConfig,
+  });
 
-    return res.data;
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      throw error.response?.data;
-    }
-    throw error;
-  }
+  return res.data;
 };
